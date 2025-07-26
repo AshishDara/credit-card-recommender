@@ -1,5 +1,7 @@
 const Conversation = require('../models/Conversation');
 const recommendationService = require('../utils/recommendationService');
+const memoryStore = require('../utils/memoryStore');
+const mongoose = require('mongoose');
 
 class RecommendationsController {
   async getRecommendations(req, res) {
@@ -13,7 +15,9 @@ class RecommendationsController {
         });
       }
 
-      const conversation = await Conversation.findOne({ sessionId });
+      const conversation = mongoose.connection.readyState === 1
+        ? await Conversation.findOne({ sessionId })
+        : await memoryStore.findConversation(sessionId);
       if (!conversation) {
         return res.status(404).json({
           success: false,
@@ -36,7 +40,12 @@ class RecommendationsController {
       }));
 
       conversation.currentStep = 'recommendations_provided';
-      await conversation.save();
+      
+      if (mongoose.connection.readyState === 1) {
+        await conversation.save();
+      } else {
+        await memoryStore.saveConversation(conversation);
+      }
 
       // Format response
       const formattedRecommendations = recommendations.map(rec => ({
@@ -77,8 +86,9 @@ class RecommendationsController {
     try {
       const { sessionId } = req.params;
 
-      const conversation = await Conversation.findOne({ sessionId })
-        .populate('recommendations.cardId');
+      const conversation = mongoose.connection.readyState === 1
+        ? await Conversation.findOne({ sessionId }).populate('recommendations.cardId')
+        : await memoryStore.findConversation(sessionId);
 
       if (!conversation) {
         return res.status(404).json({
